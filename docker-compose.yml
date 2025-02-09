@@ -1,0 +1,28 @@
+version: '3'
+services:
+  ocr-service:
+    container_name: hunyproof-backend
+    build: .
+    ports:
+      - "8100:8100"
+    env_file:
+      - .env
+    volumes:
+      - .:/app
+    depends_on:
+      - db
+
+  db:
+    container_name: hunyproof-postgres
+    image: postgres:15
+    environment:
+      - POSTGRES_DB=hunyproof
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:

@@ -1,0 +1,66 @@
+Extract information from the OCR result without correcting typos. **Important:** If any extracted value is exactly "*", then return "*" for that field (do not leave it empty or change it).
+
+Return the result in the following JSON format:
+{
+    "營養標示": {
+        "title_vailed": "",
+        "每一份量": {
+            "title_vailed": "",
+            "content": ""
+        },
+        "本包裝含": {
+            "title_vailed": "",
+            "content": ""
+        },
+        "熱量": {
+            "title_vailed": "",
+            "每份": "",
+            "每100公克 or 每日參考值百分比": ""
+        },
+        "蛋白質": {
+            "title_vailed": "",
+            "每份": "",
+            "每100公克 or 每日參考值百分比": ""
+        },
+        "脂肪": {
+            "title_vailed": "",
+            "每份": "",
+            "每100公克 or 每日參考值百分比": ""
+        },
+        "飽和脂肪": {
+            "title_vailed": "",
+            "每份": "",
+            "每100公克 or 每日參考值百分比": ""
+        },
+        "反式脂肪": {
+            "title_vailed": "",
+            "每份": "",
+            "每100公克 or 每日參考值百分比": ""
+        },
+        "碳水化合物": {
+            "title_vailed": "",
+            "每份": "",
+            "每100公克 or 每日參考值百分比": ""
+        },
+        "糖": {
+            "title_vailed": "",
+            "每份": "",
+            "每100公克 or 每日參考值百分比": ""
+        },
+        "鈉": {
+            "title_vailed": "",
+            "每份": "",
+            "每100公克 or 每日參考值百分比": ""
+        }
+    }
+}
+
+For each title encountered:
+- Preserve Units: Extract values along with their respective units.
+    Example: "50大卡" should be extracted as "value": "50大卡".
+- If the title contains typos or does not exist, set its corresponding `title_vailed` to `"false"`.
+- If the title is correct, set its corresponding `title_vailed` to `"true"`.
+- If any value from the OCR result is exactly `"*"`, then output `"*"` for that field.
+- if value is empty, then output "" for that field.
+
+

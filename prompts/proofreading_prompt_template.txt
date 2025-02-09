@@ -1,0 +1,44 @@
+Extract information from the ocr result without correcting typos. Return the result in the following JSON format:
+{
+    "品名": {
+        "title_vailed": "",
+        "content": ""
+    },
+    "原料": {
+        "title_vailed": "",
+        "content": ""
+    },
+    "過敏原資訊": {
+        "title_vailed": "",
+        "content": ""
+    },
+    "淨重": {
+        "title_vailed": "",
+        "content": ""
+    },
+    "原產地": {
+        "title_vailed": "",
+        "content": ""
+    },
+    "注意事項": {
+        "title_vailed": "",
+        "content": ""
+    },
+    "有效日期": {
+        "title_vailed": "",
+        "content": ""
+    },
+    "公司名稱": {
+        "content": ""
+    },
+    "工廠地址": {
+        "title_vailed": "",
+        "content": ""
+    },
+    "消費者免費服務專線": {
+        "title_vailed": "",
+        "content": ""
+    }
+}
+
+If the title contain typos or do not exist, set 'title_vailed' to 'false'. if correct set 'title_vailed' to 'true'
