@@ -80,6 +80,7 @@ def docx_to_json(docx_path: str) -> Dict:
         prompt_template = f.read()
     
     json_str = clean_json_string(llm(prompt_template + all_text))
+    json_str = update_title_vailed(json_str)
     # Replace single quotes with double quotes in the string before parsing
     json_str = json_str.replace("'", '"')
     result = json.loads(json_str)
@@ -130,6 +131,7 @@ def process_llm_task(prompt_path: str, ocr_result: str, lock: Lock) -> Dict:
                 prompt_template = f.read()
         llm_return = llm(prompt_template + str(ocr_result))
         json_str = clean_json_string(llm_return)
+        json_str = update_title_vailed(json_str)
         json_str = json_str.replace("'", '"')  # Convert single quotes to double quotes for valid JSON
         json_str = remove_json_comments(json_str)  # Remove any annotations
         return json.loads(json_str)  # Parse cleaned JSON
@@ -292,6 +294,23 @@ def clean_json_string(text: str) -> str:
         raise ValueError("No valid JSON found in response")
     return text[start:end + 1]
 
+def update_title_vailed(json_str: str) -> str:
+    """Find all 'title_vailed' keys and replace boolean values with string 'true' or 'false'"""
+    data = json.loads(json_str)
+    
+    def update_values(obj):
+        if isinstance(obj, dict):
+            for key, value in obj.items():
+                if key == "title_vailed" and isinstance(value, bool):
+                    obj[key] = "true" if value else "false"
+                else:
+                    update_values(value)
+        elif isinstance(obj, list):
+            for item in obj:
+                update_values(item)
+    
+    update_values(data)
+    return json.dumps(data, indent=4)
 def validate_json_format(data: Dict, template_path: str) -> bool:
     """Validate JSON against template"""
     with open(template_path, 'r', encoding='utf-8') as f:
