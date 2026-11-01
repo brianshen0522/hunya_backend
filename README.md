@@ -18,7 +18,7 @@ Ensure you have the following installed:
 - PostgreSQL 15+
 
 ### Environment Setup
-Create a `.env` file in the project root and configure the following variables:
+Copy `.env.example` to `.env` in the project root and configure the following variables:
 ```env
 # Server
 SERVER_HOST=0.0.0.0
@@ -30,10 +30,10 @@ DB_HOST=hunyproof-postgres
 DB_PORT=5432
 DB_NAME=hunyproof
 DB_USER=postgres
-DB_PASSWORD=postgres
+DB_PASSWORD=change-me
 
-# Secret Key
-SECRET_KEY=your-secret-key
+# Secret Key (generate with: openssl rand -hex 32)
+SECRET_KEY=
 ACCESS_TOKEN_EXPIRE_MINUTES=3000
 
 # LLM Configuration
@@ -46,6 +46,14 @@ LLM_MODEL=llama-3.3-70b-specdec
 # OCR Configuration
 AZURE_ENDPOINT=https://hunya.cognitiveservices.azure.com
 AZURE_SUBSCRIPTION_KEY=your-azure-key
+
+# Optional
+CORS_ORIGINS=*                  # comma separated list of allowed origins
+MAX_UPLOAD_MB=50
+DOC_TO_PDF_URL=                 # URL of the /doc_to_pdf conversion service
+DOC_TO_PDF_TOKEN=               # shared secret, required by /doc_to_pdf when set
+DEFAULT_ADMIN_PASSWORD=         # initial passwords, generated and printed once if empty
+DEFAULT_USER_PASSWORD=
 ```
 
 ### Running with Docker
