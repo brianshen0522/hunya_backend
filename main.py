@@ -4,19 +4,21 @@ from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager, create_access_token, jwt_required, get_jwt_identity
 from werkzeug.security import generate_password_hash, check_password_hash
-from random import randint
 from subprocess import check_output
 from datetime import datetime, timedelta, timezone
 from magika import Magika
 from PIL import Image
+import ast
 import enum
 import hashlib
+import hmac
 import jwt
 import os
-from os import remove
 import io
 import re
 import json
+import secrets
+import tempfile
 import time
 import shutil
 import requests
@@ -28,15 +30,20 @@ load_dotenv()
 
 # Initialize Flask app
 app = Flask(__name__)
-CORS(app)
+CORS(app, origins=[origin.strip() for origin in os.getenv("CORS_ORIGINS", "*").split(",")])
 
 # Configuration
 app.config['SQLALCHEMY_DATABASE_URI'] = f'postgresql://{os.getenv("DB_USER")}:{os.getenv("DB_PASSWORD")}@{os.getenv("DB_HOST")}:{os.getenv("DB_PORT")}/{os.getenv("DB_NAME")}'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['JWT_SECRET_KEY'] = os.getenv("SECRET_KEY")
-app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(minutes=3000)
+app.config['JWT_ACCESS_TOKEN_EXPIRES'] = timedelta(minutes=int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 3000)))
+app.config['MAX_CONTENT_LENGTH'] = int(os.getenv("MAX_UPLOAD_MB", 50)) * 1024 * 1024
 
 upload_path = os.getenv("FILES_UPLOAD_PATH")
+doc_to_pdf_url = os.getenv("DOC_TO_PDF_URL", "http://162.38.3.101:8101/doc_to_pdf")
+doc_to_pdf_token = os.getenv("DOC_TO_PDF_TOKEN")
+DOC_TO_PDF_TIMEOUT = 180
+DOCX_MIME_TYPE = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 # Initialize extensions
 db = SQLAlchemy(app)
@@ -74,6 +81,12 @@ class Verification(db.Model):
     differences_json = db.Column(db.String)
     status = db.Column(db.String, default="pending")
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+@app.after_request
+def set_security_headers(response):
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    return response
 
 # Utility Functions
 def get_current_user():
@@ -117,7 +130,7 @@ def login():
     password = request.form.get('password')
     
     user = User.query.filter_by(username=username).first()
-    if not user or not check_password_hash(user.password, password):
+    if not user or not password or not check_password_hash(user.password, password):
         return jsonify({"error": "Invalid credentials"}), 400
 
     access_token = create_access_token(identity=username)
@@ -204,7 +217,7 @@ def get_verification_info(verification_id):
     differences = None
     if verification.differences_json:
         try:
-            differences = eval(verification.differences_json)
+            differences = ast.literal_eval(verification.differences_json)
         except Exception as e:
             differences = {"error": f"Failed to parse differences: {str(e)}"}
 
@@ -259,21 +272,24 @@ def upload_files(verification_id):
             docx_hash = calculate_file_hash(docx_content)
             
             if verification.docx_hash != docx_hash:
-                if magika.identify_bytes(docx_content).output.mime_type != "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+                if magika.identify_bytes(docx_content).output.mime_type != DOCX_MIME_TYPE:
                     return jsonify({"error": "Invalid DOCX type"}), 400
 
-                docx_tmp_path = f"{upload_path}/docx/{verification_id}_tmp{os.path.splitext(docx_file.filename)[1]}"
-                docx_path = f"{upload_path}/docx/{verification_id}{os.path.splitext(docx_file.filename)[1]}"
+                docx_tmp_path = f"{upload_path}/docx/{verification_id}_tmp.docx"
+                docx_path = f"{upload_path}/docx/{verification_id}.docx"
                 
                 os.makedirs(os.path.dirname(docx_tmp_path), exist_ok=True)
                 with open(docx_tmp_path, "wb") as buffer:
                     buffer.write(docx_content)
 
                 # Convert DOCX to PDF
-                response = requests.post(
-                    "http://162.38.3.101:8101/doc_to_pdf",
-                    files={'file': open(docx_tmp_path, 'rb')}
-                )
+                with open(docx_tmp_path, 'rb') as docx_tmp_file:
+                    response = requests.post(
+                        doc_to_pdf_url,
+                        files={'file': docx_tmp_file},
+                        headers={'X-Doc-To-Pdf-Token': doc_to_pdf_token} if doc_to_pdf_token else None,
+                        timeout=DOC_TO_PDF_TIMEOUT
+                    )
 
                 if response.status_code == 200:
                     pdf_tmp_path = f"{upload_path}/pdf/{verification_id}_tmp.pdf"
@@ -338,8 +354,8 @@ def upload_files(verification_id):
         # Compare if both files are ready
         if verification.docx_json and verification.ocr_json:
             differences = compare_jsons(
-                eval(verification.docx_json),
-                eval(verification.ocr_json)
+                json.loads(verification.docx_json),
+                json.loads(verification.ocr_json)
             )
             verification.differences_json = str(differences)
             verification.status = "completed"
@@ -360,7 +376,8 @@ def upload_files(verification_id):
             os.remove(docx_path)
         if 'image_path' in locals() and os.path.exists(image_path):
             os.remove(image_path)
-        return jsonify({"error": str(e)}), 500
+        app.logger.exception("Failed to process files for verification %s", verification_id)
+        return jsonify({"error": "Failed to process files"}), 500
 
 @app.route('/verifications/<int:verification_id>/docx', methods=['GET'])
 @jwt_required()
@@ -490,11 +507,12 @@ def upload_file():
         </form>
         '''
 
-    filename = randint(0,1000)
-    filename = {
-        'docx': f'{filename}.docx',
-        'pdf': f'{filename}.pdf'
-    }
+    if doc_to_pdf_token and not hmac.compare_digest(
+        request.headers.get('X-Doc-To-Pdf-Token', '').encode(),
+        doc_to_pdf_token.encode()
+    ):
+        return jsonify({'message' : 'Unauthorized'}), 401
+
     if 'file' not in request.files:
         resp = jsonify({'message' : 'No file part in the request'})
         resp.status_code = 400
@@ -504,15 +522,32 @@ def upload_file():
         resp = resp = jsonify({'message' : 'No file selected for uploading'})
         resp.status_code = 400
         return resp
-    if file and request.method == 'POST':
-        try:
-            file.save(filename["docx"])
-            check_output(['libreoffice', '--headless', '--convert-to', 'pdf' , filename["docx"]])
-            return send_file(filename["pdf"], download_name=filename["pdf"])
-        except Exception as e:
-            return str(e)
-        finally:
-            for key in filename: remove(filename[key])
+    content = file.read()
+    if Magika().identify_bytes(content).output.mime_type not in (DOCX_MIME_TYPE, "application/msword"):
+        return jsonify({'message' : 'Invalid document type'}), 400
+
+    try:
+        with tempfile.TemporaryDirectory() as workdir:
+            docx_path = os.path.join(workdir, 'document.docx')
+            with open(docx_path, 'wb') as buffer:
+                buffer.write(content)
+            check_output([
+                'libreoffice', f'-env:UserInstallation=file://{workdir}/profile',
+                '--headless', '--convert-to', 'pdf', '--outdir', workdir, docx_path
+            ], timeout=DOC_TO_PDF_TIMEOUT)
+            with open(os.path.join(workdir, 'document.pdf'), 'rb') as pdf_file:
+                pdf_content = pdf_file.read()
+        return send_file(io.BytesIO(pdf_content), mimetype='application/pdf', download_name='document.pdf')
+    except Exception:
+        app.logger.exception("Failed to convert document")
+        return jsonify({'message' : 'Failed to convert document'}), 500
+
+def initial_password(env_name, username):
+    password = os.getenv(env_name)
+    if not password:
+        password = secrets.token_urlsafe(16)
+        print(f'Generated initial password for {username}: {password}')
+    return password
 
 def create_default_users():
     if not User.query.first():
@@ -520,13 +555,13 @@ def create_default_users():
             User(
                 username="admin",
                 email="admin@example.com",
-                password=generate_password_hash("password"),
+                password=generate_password_hash(initial_password("DEFAULT_ADMIN_PASSWORD", "admin")),
                 role=UserRole.ADMIN
             ),
             User(
                 username="user",
                 email="user@example.com",
-                password=generate_password_hash("password"),
+                password=generate_password_hash(initial_password("DEFAULT_USER_PASSWORD", "user")),
                 role=UserRole.USER
             )
         ]
@@ -542,5 +577,9 @@ def init_app():
 
 if __name__ == "__main__":
     init_app()
+    if app.config['JWT_SECRET_KEY'] == 'your-secret-key':
+        print('WARNING: SECRET_KEY is the published placeholder; tokens can be forged until it is changed')
+    if not doc_to_pdf_token:
+        print('WARNING: DOC_TO_PDF_TOKEN is not set; /doc_to_pdf accepts unauthenticated uploads')
     print('SERVER STARTING')
     serve(app, host=os.getenv("SERVER_HOST"), port=os.getenv("SERVER_PORT"))

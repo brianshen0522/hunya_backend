@@ -38,7 +38,7 @@ class AzureOCRClient:
             image_data = image.read()
 
         try:
-            response = requests.post(url, headers=headers, params=params, data=image_data)
+            response = requests.post(url, headers=headers, params=params, data=image_data, timeout=120)
             response.raise_for_status()
             result = response.json()
             return self.remove_words_objects(result)
